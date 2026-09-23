@@ -1,0 +1,10 @@
+-- Busted test configuration
+return {
+  _all = {
+    lua = 'nlua',
+    helper = 'tests/init.lua',
+    pattern = '_spec',
+  },
+  default = { ROOT = { 'tests/core' } },
+  core = { ROOT = { 'tests/core' } },
+}

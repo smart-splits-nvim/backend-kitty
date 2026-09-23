@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+  "runtime": {
+    "version": "LuaJIT"
+  },
+  "workspace": {
+    "checkThirdParty": false,
+    "library": [
+      "$VIMRUNTIME/lua",
+      "${3rd}/luv/library",
+      "deps/smart-splits.nvim/lua"
+    ],
+    "ignoreDir": ["tests", ".direnv"]
+  },
+  "diagnostics": {
+    "globals": ["vim"],
+    "libraryFiles": "Disable"
+  }
+}

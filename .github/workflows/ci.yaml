@@ -1,0 +1,56 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+      - name: Run Selene
+        run: nix develop .#ci --command just lint
+      - name: Run LuaLS
+        run: nix develop .#ci --command just typecheck
+      - name: Check formatting
+        run: nix develop .#ci --command just fmt-check
+  test:
+    name: Test / Neovim ${{ matrix.neovim }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - neovim: stable
+            devshell: ci
+          - neovim: nightly
+            devshell: ci-nightly
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            extra-substituters = https://nix-community.cachix.org
+            extra-trusted-public-keys = nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs=
+      - name: Update Neovim nightly
+        if: matrix.neovim == 'nightly'
+        run: nix flake update neovim-nightly-overlay
+      - name: Check Neovim version
+        run: |
+          nix develop .#${{ matrix.devshell }} --command nlua -e '
+            local v = vim.version()
+            print("Neovim " .. tostring(v))
+            assert((v.prerelease ~= nil) == ${{ matrix.neovim == 'nightly' }}, "expected Neovim ${{ matrix.neovim }}")
+          ' < /dev/null
+      - name: Run tests
+        run: nix develop .#${{ matrix.devshell }} --command just test
