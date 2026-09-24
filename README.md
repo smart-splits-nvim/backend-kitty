@@ -62,6 +62,8 @@ opts = {
 
 #### Mappings
 
+Add to your ~/.config/kitty/kitty.conf :
+
 ```
 map ctrl+j neighboring_window bottom
 map ctrl+k neighboring_window top
@@ -92,7 +94,7 @@ listen_on unix:/tmp/mykitty
 This will set the `KITTY_LISTEN_ON` environment variable, that the plugin uses to confirm a Kitty session.
 
 
-TODO: Resize while Neovim is focused is handled inside Neovim and, at a full-width or full-height window, by `resize-window` on the socket.
+Resize while Neovim is focused is handled inside Neovim and, at a full-width or full-height window, by `resize-window` on the socket.
 
 #### Neovim over SSH
 
