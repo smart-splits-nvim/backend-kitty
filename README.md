@@ -7,7 +7,7 @@ Neovim talks to Kitty on the `KITTY_LISTEN_ON` socket using the [remote-control 
 ## Install
 
 ### lazy.nvim
-
+The complete options list of the Plugin configuration can be found [here](https://github.com/smart-splits-nvim/smart-splits.nvim/tree/v3)
 It is recommended not to lazy load smart-splits.nvim if using the Kitty integration, since it depends on the plugin setting the IS_NVIM Kitty user variable on startup. 
 ```lua
 {
