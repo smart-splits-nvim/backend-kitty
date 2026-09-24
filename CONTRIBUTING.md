@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for your interest in contributing to this backend template!
+Thank you for your interest in contributing to the Kitty backend!
 
 ## Development Setup
 
@@ -68,7 +68,7 @@ latest nightly.
 
 ### Backend Protocol
 
-Your backend must implement the v3 protocol:
+The backend implements the v3 protocol in `lua/smart-splits-backend-kitty/`:
 
 ```lua
 ---@class SmartSplitsBackend
@@ -77,8 +77,11 @@ Your backend must implement the v3 protocol:
 ---@field detect fun():boolean
 ---@field move SmartSplitsBackendMove
 ---@field resize? SmartSplitsBackendResize
+---@field activate? fun()
 ---@field health? fun()
 ```
+
+`socket.lua` frames Kitty remote-control commands and speaks the listen socket. `kitty.lua` sends `ls`, `neighboring_window`, `resize-window`, and `launch`. Tests replace `kitty.request` with `tests/fake_kitty.lua`. Layout decisions that do not need a live Kitty instance live in `layout.lua`.
 
 ### Type Annotations
 
