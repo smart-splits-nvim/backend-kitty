@@ -6,19 +6,17 @@ describe('health()', function()
   end)
 
   it('reports healthy when backend is enabled', function()
-    local backend = require('smart-splits-backend-template')
+    local backend = require('smart-splits-backend-kitty')
     assert.is_not_nil(backend.health)
-    -- Health check should not error
     assert.has_no.errors(function()
       backend.health()
     end)
   end)
 
   it('reports unhealthy when backend is disabled', function()
-    local backend = require('smart-splits-backend-template')
+    local backend = require('smart-splits-backend-kitty')
     h.disable_backend()
     assert.is_not_nil(backend.health)
-    -- Health check should not error even when disabled
     assert.has_no.errors(function()
       backend.health()
     end)

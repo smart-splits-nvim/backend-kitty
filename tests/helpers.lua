@@ -1,20 +1,16 @@
 local M = {}
 
 function M.reset_backend()
-  local mock_mux = require('smart-splits-backend-template.mock_mux')
-  mock_mux.reset()
-  local config = require('smart-splits-backend-template.config')
-  config.setup()
+  vim.env.KITTY_LISTEN_ON = 'unix:/tmp/kitty-smart-splits-test'
+  local kitty = require('smart-splits-backend-kitty.kitty')
+  local fake = require('tests.fake_kitty')
+  fake.reset()
+  kitty.request = fake.request
+  require('smart-splits-backend-kitty.config').setup()
 end
 
 function M.disable_backend()
-  local mock_mux = require('smart-splits-backend-template.mock_mux')
-  mock_mux.set_enabled(false)
-end
-
-function M.enable_backend()
-  local mock_mux = require('smart-splits-backend-template.mock_mux')
-  mock_mux.set_enabled(true)
+  vim.env.KITTY_LISTEN_ON = nil
 end
 
 return M
