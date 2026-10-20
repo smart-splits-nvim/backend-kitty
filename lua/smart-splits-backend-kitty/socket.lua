@@ -103,7 +103,13 @@ local function connect(addr)
     local host = host_or_path == 'localhost' and '127.0.0.1' or host_or_path
     client:connect(host, port, on_connect)
   else
-    client:connect(host_or_path, on_connect)
+    if host_or_path:sub(1, 1) == '@' then
+      -- kitty writes abstract sockets with '@', libuv wants a leading NUL byte,
+      -- which `connect` truncates at, so it needs `connect2`
+      client:connect2('\0' .. host_or_path:sub(2), 0, on_connect)
+    else
+      client:connect(host_or_path, on_connect)
+    end
   end
 
   local ok, wait_err = pcall(wait_until, function()
