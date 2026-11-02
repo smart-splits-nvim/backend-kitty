@@ -55,4 +55,52 @@ describe('socket protocol', function()
     assert.are.equal(nil, data)
     assert.are.equal('nope', err)
   end)
+
+  describe('abstract unix sockets', function()
+    local uv = vim.uv
+    local original_listen_on = vim.env.KITTY_LISTEN_ON
+    local server
+
+    after_each(function()
+      vim.env.KITTY_LISTEN_ON = original_listen_on
+      if server and not server:is_closing() then
+        server:close()
+      end
+      server = nil
+    end)
+
+    it('connects to a kitty listen address written with a leading @', function()
+      local probe = uv.new_pipe(false)
+      if vim.fn.has('linux') == 0 or not probe.bind2 or not probe.connect2 then
+        probe:close()
+        pending('abstract sockets need Linux and libuv with pipe bind2/connect2')
+        return
+      end
+      probe:close()
+
+      local name = ('smart-splits-backend-kitty-test-%d'):format(uv.os_getpid())
+      server = uv.new_pipe(false)
+      assert(server:bind2('\0' .. name, 0))
+
+      local received = ''
+      server:listen(1, function()
+        local peer = uv.new_pipe(false)
+        server:accept(peer)
+        peer:read_start(function(_, data)
+          if data then
+            received = received .. data
+          end
+        end)
+      end)
+
+      vim.env.KITTY_LISTEN_ON = 'unix:@' .. name
+      local command = { cmd = 'focus-window', version = { 0, 45, 0 } }
+      socket.send(command)
+
+      assert.is_true(vim.wait(2000, function()
+        return received:sub(-2) == ESC .. '\\'
+      end, 10))
+      assert.are.equal(socket.encode(command), received)
+    end)
+  end)
 end)
