@@ -14,7 +14,9 @@ globals:
   pending:
     args:
       - type: string
+        required: true
       - type: function
+        required: false
   setup:
     args:
       - type: function

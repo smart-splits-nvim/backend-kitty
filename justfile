@@ -1,5 +1,5 @@
 # Smart-splits core revision to test against
-SMART_SPLITS_REV := "master"
+SMART_SPLITS_REV := "v3.0.0"
 
 # Clone smart-splits core at pinned revision (no-op if already correct)
 [private]
