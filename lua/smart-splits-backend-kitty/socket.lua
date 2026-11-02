@@ -9,7 +9,7 @@ local FRAME_SUFFIX = ESC .. '\\'
 
 ---@param addr string
 ---@return 'tcp'|'unix'|nil
----@return string|integer|nil
+---@return string|nil
 ---@return integer|nil
 function M.parse_address(addr)
   local host, port = addr:match('^tcp:([^:]+):(%d+)$')
@@ -84,7 +84,7 @@ end
 ---@return table client
 local function connect(addr)
   local kind, host_or_path, port = M.parse_address(addr)
-  if not kind then
+  if not kind or not host_or_path then
     error(host_or_path)
   end
 
