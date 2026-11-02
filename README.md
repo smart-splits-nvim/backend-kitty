@@ -8,6 +8,16 @@ All conversation between Neovim and Kitty happens through socket using the [remo
 
 <!-- BEGIN mktoc {"min_depth":2, "max_depth":5} -->
 
+- [Install](#install)
+  - [lazy.nvim](#lazynvim)
+    - [Backend Configuration Options](#backend-configuration-options)
+  - [Kitty Configuration](#kitty-configuration)
+    - [Mappings](#mappings)
+- [Smart-splits.nvim Setup END](#smart-splitsnvim-setup-end)
+    - [Communication](#communication)
+- [Neovim over SSH](#neovim-over-ssh)
+- [Health](#health)
+- [Contributing](#contributing)
 <!-- END mktoc -->
 
 ## Install
