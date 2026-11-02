@@ -1,21 +1,30 @@
 # Backend Kitty
 
-Kitty integration for [smart-splits.nvim](https://github.com/smart-splits-nvim/smart-splits.nvim) v3.
+Kitty integration for [smart-splits.nvim](https://github.com/smart-splits-nvim/smart-splits.nvim):
 
-Neovim talks to Kitty on the `KITTY_LISTEN_ON` socket using the [remote-control protocol](https://sw.kovidgoyal.net/kitty/rc_protocol/).
+| Smarter and more intuitive split pane management for Neovim. Resize splits using a mental model of left/right/up/down instead of wider/narrower/taller/shorter. Navigate seamlessly between Neovim windows and terminal multiplexer panes with a clean, backend-driven architecture.
+
+All conversation between Neovim and Kitty happens through socket using the [remote-control protocol](https://sw.kovidgoyal.net/kitty/rc_protocol/).
+
+<!-- BEGIN mktoc {"min_depth":2, "max_depth":5} -->
+
+<!-- END mktoc -->
 
 ## Install
 
-### lazy.nvim
-The complete options list of the Plugin configuration can be found [here](https://github.com/smart-splits-nvim/smart-splits.nvim/tree/v3).
+First complete the [smart-splits.nvim](https://github.com/smart-splits-nvim/smart-splits.nvim) installation/setup instructions.
+The complete list of options for the plugin configuration can be found there.
 
-It is recommended not to lazy load smart-splits.nvim if using the Kitty integration, since it depends on the plugin setting the IS_NVIM Kitty user variable on startup. 
+### lazy.nvim
+
+It is recommended not to lazy load smart-splits.nvim if using the Kitty integration, since it depends on the plugin setting the IS_NVIM user variable at start-up.
 
 It is also strongly recommended setting up an password, otherwise arbitrary processes can control Kitty and execute commands. More in Kitty [documentation](https://sw.kovidgoyal.net/kitty/conf/#opt-kitty.remote_control_password).
+
 ```lua
 {
   'smart-splits-nvim/smart-splits.nvim',
-  branch = 'v3',
+  version = '^3.0.0',
   lazy = false,
   opts = { -- Plugin Configuration
     mux = {
@@ -26,6 +35,7 @@ It is also strongly recommended setting up an password, otherwise arbitrary proc
     {
       'smart-splits-nvim/backend-kitty',
       module = 'smart-splits-backend-kitty',
+	  build = "./kitten/install_relative_resize.lua",
       opts = { -- Backend Configuration
         -- password = 'secret',
       },
@@ -34,15 +44,14 @@ It is also strongly recommended setting up an password, otherwise arbitrary proc
 }
 ```
 
-#### Backend Configuration
+#### Backend Configuration Options
 
 ```lua
 opts = {
   -- Set false to force detect() to fail without uninstalling the plugin.
   enable = true,
 
-  -- Remote-control password. When unset, falls back to
-  -- vim.g.smart_splits_kitty_password.
+  -- Remote-control password. Refer to the Kitty documentation for more details.
   -- https://sw.kovidgoyal.net/kitty/conf/#opt-kitty.remote_control_password
   password = nil,
 
@@ -65,28 +74,47 @@ opts = {
 
 #### Mappings
 
-Add to your ~/.config/kitty/kitty.conf :
+Add to your Kitty configuration (usually ~/.config/kitty/kitty.conf) :
 
 ```
+## Smart-splits.nvim Setup
 map ctrl+j neighboring_window bottom
 map ctrl+k neighboring_window top
 map ctrl+h neighboring_window left
 map ctrl+l neighboring_window right
 
+# Unset the mappings to pass control to Neovim
 map --when-focus-on var:IS_NVIM ctrl+j
 map --when-focus-on var:IS_NVIM ctrl+k
 map --when-focus-on var:IS_NVIM ctrl+h
 map --when-focus-on var:IS_NVIM ctrl+l
+
+map --when-focus-on var:IS_NVIM alt+j
+map --when-focus-on var:IS_NVIM alt+k
+map --when-focus-on var:IS_NVIM alt+h
+map --when-focus-on var:IS_NVIM alt+l
+
+# **Optiomal** : Use the provided Kitten to control the Resizing of Kitty's
+# windows outside of Neovim.
+# The number 20 here is the resize amount: adjust as needed
+map alt+j kitten relative_resize.py down  20
+map alt+k kitten relative_resize.py up    20
+map alt+h kitten relative_resize.py left  20
+map alt+l kitten relative_resize.py right 20
+
+## Smart-splits.nvim Setup END
 ```
 
 #### Communication
+
 Kitty has to accept remote-control commands. Either start it with a socket:
+
 ```bash
 
 kitty -o allow_remote_control=yes --single-instance --listen-on unix:/tmp/mykitty
 ```
 
-or put the same settings in `~/.config/kitty/kitty.conf`:
+Or add/modify these settings in your Kitty configuration:
 
 ```
 # Unix systems:
@@ -96,12 +124,13 @@ listen_on unix:/tmp/mykitty
 
 This will set the `KITTY_LISTEN_ON` environment variable, that the plugin uses to confirm a Kitty session.
 
+## Neovim over SSH
 
-Resize while Neovim is focused is handled inside Neovim and, at a full-width or full-height window, by `resize-window` on the socket.
+The remote machine needs Neovim with this plugin installed.
 
-#### Neovim over SSH
+To forward the Kitty socket use `kitten ssh` instead of the vanilla 'ssh' command.
 
-The remote machine needs Neovim and this plugin. Forward the Kitty socket with `kitten ssh`, and only do that for hosts you trust: forwarded remote control gives the remote host access to the local Kitty instance.
+Only forward that for hosts you trust: forwarding remote control gives the remote host access to the local Kitty instance.
 
 In the local `~/.config/kitty/ssh.conf`:
 
@@ -109,7 +138,7 @@ In the local `~/.config/kitty/ssh.conf`:
 forward_remote_control yes
 ```
 
-Use a filesystem socket rather than an abstract one:
+Use a file system socket rather than an abstract one (don't use the 'unix:@mykitty'):
 
 ```
 allow_remote_control yes
@@ -128,10 +157,7 @@ See Kitty's [SSH remote control documentation](https://sw.kovidgoyal.net/kitty/k
 
 `:checkhealth smart-splits-backend-kitty` runs the same report on its own.
 
-## Testing
+## Contributing
 
-```sh
-just test
-```
-
-The suite stubs the socket with an in-memory layout, and it also runs smart-splits' protocol conformance tests. See [CONTRIBUTING.md](./CONTRIBUTING.md).
+Found a bug? Had a brilliant idea? Feel free to open an issue or a pull request! 🙌.
+See how :[CONTRIBUTING.md](./CONTRIBUTING.md).
