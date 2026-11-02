@@ -99,12 +99,12 @@ end
 ---@return table<integer, { x: number, y: number, w: number, h: number }>
 function M.place(windows)
   local by_id = M.index_by_id(windows)
-  ---@type table<integer, { x: number|nil, y: number|nil, w: number, h: number }>
+  ---@type table<integer, { x: number, y: number, w: number, h: number }>
   local box = {}
   for _, window in ipairs(windows or {}) do
     box[window.id] = {
-      x = nil,
-      y = nil,
+      x = 0,
+      y = 0,
       w = window.columns or window.width or 1,
       h = window.lines or window.height or 1,
     }
@@ -195,8 +195,7 @@ function M.wrap_target(windows, origin, direction)
   for _, window in ipairs(windows or {}) do
     local box = boxes[window.id]
     if window.id ~= origin.id and box and box.x ~= nil and box.y ~= nil then
-      local aligned = horizontal
-          and overlaps(origin_box.y, origin_box.y + origin_box.h, box.y, box.y + box.h)
+      local aligned = horizontal and overlaps(origin_box.y, origin_box.y + origin_box.h, box.y, box.y + box.h)
         or (not horizontal and overlaps(origin_box.x, origin_box.x + origin_box.w, box.x, box.x + box.w))
       if aligned then
         local pos = horizontal and box.x or box.y
