@@ -39,6 +39,7 @@ just check
 ```
 
 This runs:
+
 - Formatting checks (Stylua, yamlfmt, prettier, tombi, actionlint, statix)
 - Selene linting
 - LuaLS type checking
@@ -86,6 +87,7 @@ The backend implements the v3 protocol in `lua/smart-splits-backend-kitty/`:
 ### Type Annotations
 
 Use LuaCATS type annotations extensively. All functions should have:
+
 - Parameter types with `@param`
 - Return types with `@return`
 - Class definitions with `@class` and `@field`
@@ -104,6 +106,7 @@ end
 ### Testing
 
 All new functionality should include tests. The test suite uses:
+
 - Busted test framework
 - nlua (Neovim Lua interpreter)
 - smart-splits core's `protocol_tests` for conformance
@@ -129,4 +132,4 @@ These are enforced by Stylua, yamlfmt, prettier, tombi, actionlint, and statix.
 
 ## Questions?
 
-Open an issue if you have questions about implementing a backend.
+Open an issue if you have any questions.
