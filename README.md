@@ -2,9 +2,9 @@
 
 Kitty integration for [smart-splits.nvim](https://github.com/smart-splits-nvim/smart-splits.nvim):
 
-| Smarter and more intuitive split pane management for Neovim. Resize splits using a mental model of left/right/up/down instead of wider/narrower/taller/shorter. Navigate seamlessly between Neovim windows and terminal multiplexer panes with a clean, backend-driven architecture.
+| Smarter and more intuitive split pane management for NeoVim. Resize splits using a mental model of left/right/up/down instead of wider/narrower/taller/shorter. Navigate seamlessly between NeoVim windows and terminal multiplexer panes with a clean, backend-driven architecture.
 
-All conversation between Neovim and Kitty happens through socket using the [remote-control protocol](https://sw.kovidgoyal.net/kitty/rc_protocol/).
+All conversation between NeoVim and Kitty happens through socket using the [remote-control protocol](https://sw.kovidgoyal.net/kitty/rc_protocol/).
 
 <!-- BEGIN mktoc {"min_depth":2, "max_depth":5} -->
 
@@ -14,10 +14,11 @@ All conversation between Neovim and Kitty happens through socket using the [remo
   - [Kitty Configuration](#kitty-configuration)
     - [Mappings](#mappings)
 - [Smart-splits.nvim Setup END](#smart-splitsnvim-setup-end)
-    - [Communication](#communication)
-- [Neovim over SSH](#neovim-over-ssh)
+  - [Communication](#communication)
+- [NeoVim over SSH](#neovim-over-ssh)
 - [Health](#health)
 - [Contributing](#contributing)
+
 <!-- END mktoc -->
 
 ## Install
@@ -136,7 +137,7 @@ This will set the `KITTY_LISTEN_ON` environment variable, that the plugin uses t
 
 ## Neovim over SSH
 
-The remote machine needs Neovim with this plugin installed.
+The remote machine needs NeoVim with this plugin installed.
 
 To forward the Kitty socket use `kitten ssh` instead of the vanilla 'ssh' command.
 
