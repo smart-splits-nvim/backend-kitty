@@ -2,9 +2,9 @@
 
 Kitty integration for [smart-splits.nvim](https://github.com/smart-splits-nvim/smart-splits.nvim):
 
-| Smarter and more intuitive split pane management for Neovim. Resize splits using a mental model of left/right/up/down instead of wider/narrower/taller/shorter. Navigate seamlessly between Neovim windows and terminal multiplexer panes with a clean, backend-driven architecture.
+| Smarter and more intuitive split pane management for NeoVim. Resize splits using a mental model of left/right/up/down instead of wider/narrower/taller/shorter. Navigate seamlessly between NeoVim windows and terminal multiplexer panes with a clean, backend-driven architecture.
 
-All conversation between Neovim and Kitty happens through socket using the [remote-control protocol](https://sw.kovidgoyal.net/kitty/rc_protocol/).
+All conversation between NeoVim and Kitty happens through socket using the [remote-control protocol](https://sw.kovidgoyal.net/kitty/rc_protocol/).
 
 <!-- BEGIN mktoc {"min_depth":2, "max_depth":5} -->
 
@@ -15,6 +15,7 @@ All conversation between Neovim and Kitty happens through socket using the [remo
     - [Mappings](#mappings)
 - [Smart-splits.nvim Setup END](#smart-splitsnvim-setup-end)
     - [Communication](#communication)
+      - [Password](#password)
 - [Neovim over SSH](#neovim-over-ssh)
 - [Health](#health)
 - [Contributing](#contributing)
@@ -134,9 +135,35 @@ listen_on unix:/tmp/mykitty
 
 This will set the `KITTY_LISTEN_ON` environment variable, that the plugin uses to confirm a Kitty session.
 
+##### Password
+
+| When using the remote_control_password option communication to the terminal is encrypted to keep the password secure. A public key is used from the KITTY_PUBLIC_KEY environment variable.
+
+When setting up a password in your plugin configuration, you have to add to you Kitty configuration:
+
+```
+remote_control_password "yourpassword" ls focus-window resize-window action goto-layout launch
+```
+
+And add/change the 'allow_remote_control' to:
+
+```
+allow_remote_control password
+```
+
+You can control what commands can be executed by the remote host but the minimum required by the plugin are: `ls focus-window resize-window action goto-layout launch`
+
+More information in Kitty's [documentation](https://sw.kovidgoyal.net/kitty/conf/#opt-kitty.remote_control_password).
+
+If you receive an error message like: "Remote control is disabled. Add allow_remote_control to your kitty.conf", make sure:
+
+- You provided the correct password in your plugin configuration.
+- You provided the minimum permissions to the 'remote_control_password'.
+- You used `kitten ssh` instead of `ssh` when using NeoVim over ssh (see bellow).
+
 ## Neovim over SSH
 
-The remote machine needs Neovim with this plugin installed.
+The remote machine needs NeoVim with this plugin installed.
 
 To forward the Kitty socket use `kitten ssh` instead of the vanilla 'ssh' command.
 

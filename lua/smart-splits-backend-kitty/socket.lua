@@ -1,6 +1,8 @@
 ---Kitty remote-control framing and a synchronous socket client.
 ---Commands are `<ESC>P@kitty-cmd<JSON><ESC>\`. See https://sw.kovidgoyal.net/kitty/rc_protocol/
 
+local crypto = require('smart-splits-backend-kitty.crypto')
+
 local M = {}
 
 local ESC = string.char(0x1b)
@@ -37,7 +39,7 @@ end
 ---@param command table
 ---@return string
 function M.encode(command)
-  return FRAME_PREFIX .. vim.json.encode(command) .. FRAME_SUFFIX
+  return FRAME_PREFIX .. vim.json.encode(crypto.encrypt(command)) .. FRAME_SUFFIX
 end
 
 ---Unwrap a kitty response. `data` is JSON-encoded a second time, as with `ls`.
