@@ -14,11 +14,11 @@ All conversation between NeoVim and Kitty happens through socket using the [remo
   - [Kitty Configuration](#kitty-configuration)
     - [Mappings](#mappings)
 - [Smart-splits.nvim Setup END](#smart-splitsnvim-setup-end)
-  - [Communication](#communication)
-- [NeoVim over SSH](#neovim-over-ssh)
+    - [Communication](#communication)
+      - [Password](#password)
+- [Neovim over SSH](#neovim-over-ssh)
 - [Health](#health)
 - [Contributing](#contributing)
-
 <!-- END mktoc -->
 
 ## Install
