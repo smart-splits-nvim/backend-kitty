@@ -135,6 +135,32 @@ listen_on unix:/tmp/mykitty
 
 This will set the `KITTY_LISTEN_ON` environment variable, that the plugin uses to confirm a Kitty session.
 
+##### Password
+
+| When using the remote_control_password option communication to the terminal is encrypted to keep the password secure. A public key is used from the KITTY_PUBLIC_KEY environment variable.
+
+When setting up a password in your plugin configuration, you have to add to you Kitty configuration:
+
+```
+remote_control_password "yourpassword" ls focus-window resize-window action goto-layout launch
+```
+
+And add/change the 'allow_remote_control' to:
+
+```
+allow_remote_control password
+```
+
+You can control what commands can be executed by the remote host but the minimum required by the plugin are: `ls focus-window resize-window action goto-layout launch`
+
+More information in Kitty's [documentation](https://sw.kovidgoyal.net/kitty/conf/#opt-kitty.remote_control_password).
+
+If you receive an error message like: "Remote control is disabled. Add allow_remote_control to your kitty.conf", make sure:
+
+- You provided the correct password in your plugin configuration.
+- You provided the minimum permissions to the 'remote_control_password'.
+- You used `kitten ssh` instead of `ssh` when using NeoVim over ssh (see bellow).
+
 ## Neovim over SSH
 
 The remote machine needs NeoVim with this plugin installed.
