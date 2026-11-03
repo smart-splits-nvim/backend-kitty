@@ -62,14 +62,23 @@
           default = pkgs.mkShell {
             name = "backend-kitty";
             packages = packagesFor pkgs;
+            shellHook = ''
+              export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.openssl ]}:$LD_LIBRARY_PATH"
+            '';
           };
           ci = pkgs.mkShell {
             name = "ci";
             packages = packagesFor pkgs;
+            shellHook = ''
+              export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.openssl ]}:$LD_LIBRARY_PATH"
+            '';
           };
           ci-nightly = nightlyPkgs.mkShell {
             name = "ci-nightly";
             packages = packagesFor nightlyPkgs;
+            shellHook = ''
+              export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.openssl ]}:$LD_LIBRARY_PATH"
+            '';
           };
         };
         checks = {
