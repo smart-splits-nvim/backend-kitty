@@ -15,12 +15,17 @@ local function window_id()
 end
 
 ---Send one remote-control command. Tests replace this.
----With `no_response`, kitty sends nothing back and the result is `true` after the write.
+---With `no_response`, the socket path returns `true` after the write.
+---The optional stdin CLI transport always waits for acknowledgement.
 ---@param cmd string
 ---@param payload? table
 ---@param opts? { no_response?: boolean }
 ---@return any
 function M.request(cmd, payload, opts)
+  local password = config.password()
+  if config.options.provide_password_via_stdin and password ~= '' then
+    return require('smart-splits-backend-kitty.cli').request(cmd, payload, password)
+  end
   opts = opts or {}
   local command = {
     cmd = cmd,
@@ -31,7 +36,6 @@ function M.request(cmd, payload, opts)
   if payload then
     command.payload = payload
   end
-  local password = config.password()
   if password ~= '' then
     command.password = password
   end
