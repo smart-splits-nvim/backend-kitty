@@ -66,6 +66,9 @@ opts = {
   -- https://sw.kovidgoyal.net/kitty/conf/#opt-kitty.remote_control_password
   password = nil,
 
+  -- Use kitten/kitty with the password on stdin instead of native encryption.
+  provide_password_via_stdin = false,
+
   -- Which edges may create a Kitty split when move.at_edge is 'split'.
   split = {
     left = true,
@@ -136,6 +139,17 @@ listen_on unix:/tmp/mykitty
 This will set the `KITTY_LISTEN_ON` environment variable, that the plugin uses to confirm a Kitty session.
 
 ##### Password
+
+By default, password authentication encrypts commands inside Neovim using OpenSSL
+libcrypto. Set `provide_password_via_stdin = true` to use `kitten` (preferred) or
+`kitty` on Neovim's `PATH` instead. This avoids the plugin's libcrypto dependency
+but starts a client process for each authenticated command. Both transports need
+`KITTY_PUBLIC_KEY` from Kitty.
+
+With this option, the configured `password` (or legacy
+`vim.g.smart_splits_kitty_password`) is passed to the client over stdin, without
+changing `KITTY_RC_PASSWORD`. Commands wait for acknowledgement so authentication
+errors are reported. Requests without a configured password still use the socket.
 
 | When using the remote_control_password option communication to the terminal is encrypted to keep the password secure. A public key is used from the KITTY_PUBLIC_KEY environment variable.
 
