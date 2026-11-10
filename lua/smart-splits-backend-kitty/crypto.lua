@@ -459,13 +459,17 @@ function M.encrypt(command)
   end
 
   local to_encrypt = vim.deepcopy(command)
-  if not to_encrypt.timestamp then
+  local timestamp
+  if to_encrypt.timestamp then
+    timestamp = string.format('%.0f', to_encrypt.timestamp)
+  else
     local t = vim.uv.clock_gettime('realtime')
     if not t then
       error('failed to get system time')
     end
-    to_encrypt.timestamp = t.sec * 1000000000 + t.nsec
+    timestamp = string.format('%d%09d', t.sec, t.nsec)
   end
+  to_encrypt.timestamp = nil
 
   local iv = to_encrypt._iv or vim.uv.random(12)
   to_encrypt._iv = nil
@@ -473,7 +477,9 @@ function M.encrypt(command)
     error('failed to generate random bytes for IV')
   end
 
-  local plaintext = vim.json.encode(to_encrypt)
+  -- Kitty 0.50 requires a JSON integer. Encoding nanoseconds as a Lua number
+  -- produces scientific notation, which Kitty parses as a float and rejects.
+  local plaintext = vim.json.encode(to_encrypt):sub(1, -2) .. ',"timestamp":' .. timestamp .. '}'
   local ciphertext, tag, client_pubkey = M.encrypt_payload(peer_pubkey, iv, plaintext)
 
   return {

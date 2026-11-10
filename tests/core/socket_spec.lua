@@ -198,6 +198,17 @@ describe('socket protocol', function()
       assert.is_not_nil(outer.pubkey)
       assert.is_not_nil(outer.encrypted)
 
+      local plaintext = crypto.decrypt_payload(
+        server_key.private,
+        crypto.b85decode(outer.pubkey),
+        crypto.b85decode(outer.iv),
+        crypto.b85decode(outer.tag),
+        crypto.b85decode(outer.encrypted)
+      )
+      -- Lua decodes both JSON integers and floats as numbers, so inspect the wire format.
+      assert.matches('"timestamp":%d+[,}]', plaintext)
+      assert.is_nil(original_cmd.timestamp)
+
       local decrypted = crypto.decrypt(outer, server_key.private)
       assert.are.equal(original_cmd.cmd, decrypted.cmd)
       assert.are.equal(original_cmd.password, decrypted.password)
@@ -209,6 +220,20 @@ describe('socket protocol', function()
       local now_ns = t.sec * 1000000000 + t.nsec
       local diff = math.abs(now_ns - decrypted.timestamp)
       assert.is_true(diff < 5 * 1000000000)
+    end)
+
+    it('encodes a supplied nanosecond timestamp as a JSON integer', function()
+      local command = { cmd = 'ls', password = 'secret', timestamp = 1794323089000000000 }
+      local outer = crypto.encrypt(command)
+      local plaintext = crypto.decrypt_payload(
+        server_key.private,
+        crypto.b85decode(outer.pubkey),
+        crypto.b85decode(outer.iv),
+        crypto.b85decode(outer.tag),
+        crypto.b85decode(outer.encrypted)
+      )
+      assert.matches('"timestamp":1794323089000000000[,}]', plaintext)
+      assert.are.equal(1794323089000000000, command.timestamp)
     end)
 
     it('fails decryption when ciphertext or tag is tampered with', function()
