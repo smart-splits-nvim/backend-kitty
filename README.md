@@ -155,7 +155,10 @@ You can control what commands can be executed by the remote host but the minimum
 
 More information in Kitty's [documentation](https://sw.kovidgoyal.net/kitty/conf/#opt-kitty.remote_control_password).
 
-If you receive an error message like: "Remote control is disabled. Add allow_remote_control to your kitty.conf", make sure:
+If you receive an error message like: "Remote control is disabled. Add allow_remote_control to your kitty.conf" or a screen as:
+![error](./assets/password_missing.png)
+
+Make sure:
 
 - You provided the correct password in your plugin configuration.
 - You provided the minimum permissions to the 'remote_control_password'.
