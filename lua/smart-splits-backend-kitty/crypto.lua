@@ -1,9 +1,16 @@
----Kitty remote-control encryption and Base85 utilities.
----See https://sw.kovidgoyal.net/kitty/rc_protocol/
+---Kitty remote-control encryption in pure Lua for use when a password is provided.
+---Commands are encrypted with AES-256-GCM under SHA-256(X25519(client private key, kitty public key)).
+---See https://sw.kovidgoyal.net/kitty/rc_protocol/#encrypted-communication
 
-local ffi = require('ffi')
+local bit = require('bit')
+local band, bor, bxor, bnot = bit.band, bit.bor, bit.bxor, bit.bnot
+local lshift, rshift, arshift, ror, tobit = bit.lshift, bit.rshift, bit.arshift, bit.ror, bit.tobit
+local floor = math.floor
+local unpack = unpack or table.unpack
 
 local M = {}
+
+-- Base85 (RFC 1924 alphabet, as Python's base64.b85encode)
 
 local B85_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~'
 local B85_CHARS = {}
@@ -13,95 +20,6 @@ for i = 1, #B85_ALPHABET do
   B85_DEC[B85_ALPHABET:byte(i)] = i - 1
 end
 
-pcall(
-  ffi.cdef,
-  [[
-  typedef struct evp_pkey_st EVP_PKEY;
-  typedef struct evp_pkey_ctx_st EVP_PKEY_CTX;
-  typedef struct evp_cipher_ctx_st EVP_CIPHER_CTX;
-  typedef struct evp_cipher_st EVP_CIPHER;
-
-  int OBJ_sn2nid(const char *s);
-  const EVP_CIPHER *EVP_aes_256_gcm(void);
-  EVP_CIPHER_CTX *EVP_CIPHER_CTX_new(void);
-  void EVP_CIPHER_CTX_free(EVP_CIPHER_CTX *ctx);
-  int EVP_EncryptInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher, void *impl, const unsigned char *key, const unsigned char *iv);
-  int EVP_DecryptInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher, void *impl, const unsigned char *key, const unsigned char *iv);
-  int EVP_CIPHER_CTX_ctrl(EVP_CIPHER_CTX *ctx, int type, int arg, void *ptr);
-  int EVP_EncryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl, const unsigned char *in, int inl);
-  int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl);
-  int EVP_DecryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl, const unsigned char *in, int inl);
-  int EVP_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl);
-
-  unsigned char *SHA256(const unsigned char *d, size_t n, unsigned char *md);
-
-  EVP_PKEY_CTX *EVP_PKEY_CTX_new_id(int id, void *e);
-  void EVP_PKEY_CTX_free(EVP_PKEY_CTX *ctx);
-  int EVP_PKEY_keygen_init(EVP_PKEY_CTX *ctx);
-  int EVP_PKEY_keygen(EVP_PKEY_CTX *ctx, EVP_PKEY **ppkey);
-  void EVP_PKEY_free(EVP_PKEY *key);
-  int EVP_PKEY_get_raw_public_key(const EVP_PKEY *pkey, unsigned char *pub, size_t *len);
-  int EVP_PKEY_get_raw_private_key(const EVP_PKEY *pkey, unsigned char *priv, size_t *len);
-  EVP_PKEY *EVP_PKEY_new_raw_public_key(int type, void *e, const unsigned char *key, size_t keylen);
-  EVP_PKEY *EVP_PKEY_new_raw_private_key(int type, void *e, const unsigned char *key, size_t keylen);
-  EVP_PKEY_CTX *EVP_PKEY_CTX_new(EVP_PKEY *pkey, void *e);
-  int EVP_PKEY_derive_init(EVP_PKEY_CTX *ctx);
-  int EVP_PKEY_derive_set_peer(EVP_PKEY_CTX *ctx, EVP_PKEY *peer);
-  int EVP_PKEY_derive(EVP_PKEY_CTX *ctx, unsigned char *key, size_t *keylen);
-]]
-)
-
-local loaded_crypto = nil
-local function get_crypto()
-  if loaded_crypto then
-    return loaded_crypto
-  end
-  local names = {
-    'crypto',
-    'libcrypto.so.3',
-    'libcrypto.so.1.1',
-    'libcrypto.so',
-    'libcrypto.dylib',
-    '/opt/homebrew/opt/openssl@3/lib/libcrypto.dylib',
-    '/usr/local/opt/openssl@3/lib/libcrypto.dylib',
-    '/opt/homebrew/opt/openssl/lib/libcrypto.dylib',
-    '/usr/local/opt/openssl/lib/libcrypto.dylib',
-    '/usr/lib/libcrypto.dylib',
-    'libcrypto-3-x64',
-    'libcrypto-1_1-x64',
-  }
-  for _, name in ipairs(names) do
-    local ok, lib = pcall(ffi.load, name)
-    if ok and lib then
-      loaded_crypto = lib
-      return loaded_crypto
-    end
-  end
-  local ok, lib = pcall(function()
-    return ffi.C
-  end)
-  if ok and lib then
-    loaded_crypto = lib
-    return loaded_crypto
-  end
-  error('failed to load OpenSSL libcrypto for encrypted kitty communication')
-end
-
-local cached_nid = nil
-local function get_nid_x25519(crypto)
-  if cached_nid then
-    return cached_nid
-  end
-  local ok, nid = pcall(crypto.OBJ_sn2nid, 'X25519')
-  if ok and type(nid) == 'number' and nid > 0 then
-    cached_nid = nid
-    return cached_nid
-  end
-  cached_nid = 1034
-  return cached_nid
-end
-
----RFC 1924 / Python standard Base85 encoding.
 ---@param b string
 ---@return string
 function M.b85encode(b)
@@ -114,13 +32,13 @@ function M.b85encode(b)
     local b0, b1, b2, b3 = b:byte(i, i + 3)
     local word = b0 * 16777216 + b1 * 65536 + b2 * 256 + b3
     local d4 = word % 85
-    word = math.floor(word / 85)
+    word = floor(word / 85)
     local d3 = word % 85
-    word = math.floor(word / 85)
+    word = floor(word / 85)
     local d2 = word % 85
-    word = math.floor(word / 85)
+    word = floor(word / 85)
     local d1 = word % 85
-    local d0 = math.floor(word / 85)
+    local d0 = floor(word / 85)
     chunks[#chunks + 1] = B85_CHARS[d0] .. B85_CHARS[d1] .. B85_CHARS[d2] .. B85_CHARS[d3] .. B85_CHARS[d4]
   end
   local res = table.concat(chunks)
@@ -130,7 +48,6 @@ function M.b85encode(b)
   return res
 end
 
----RFC 1924 / Python standard Base85 decoding.
 ---@param s string
 ---@return string
 function M.b85decode(s)
@@ -149,11 +66,8 @@ function M.b85decode(s)
     if acc > 4294967295 then
       error('base85 overflow')
     end
-    local b0 = math.floor(acc / 16777216) % 256
-    local b1 = math.floor(acc / 65536) % 256
-    local b2 = math.floor(acc / 256) % 256
-    local b3 = acc % 256
-    out[#out + 1] = string.char(b0, b1, b2, b3)
+    out[#out + 1] =
+      string.char(floor(acc / 16777216) % 256, floor(acc / 65536) % 256, floor(acc / 256) % 256, acc % 256)
   end
   local res = table.concat(out)
   if padding > 0 then
@@ -162,289 +76,488 @@ function M.b85decode(s)
   return res
 end
 
----@param peer_pubkey_raw string
+-- SHA-256
+
+-- stylua: ignore
+local SHA256_K = {
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+}
+
+---@param n integer
+---@return string
+local function u32_be(n)
+  return string.char(band(rshift(n, 24), 255), band(rshift(n, 16), 255), band(rshift(n, 8), 255), band(n, 255))
+end
+
+---@param msg string
+---@return string 32-byte digest
+function M.sha256(msg)
+  local bits = #msg * 8
+  msg = msg
+    .. '\128'
+    .. string.rep('\0', (55 - #msg) % 64)
+    .. u32_be(floor(bits / 4294967296))
+    .. u32_be(bits % 4294967296)
+
+  local h0, h1, h2, h3 = 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a
+  local h4, h5, h6, h7 = 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+  local w = {}
+  for chunk = 1, #msg, 64 do
+    for i = 0, 15 do
+      local b0, b1, b2, b3 = msg:byte(chunk + i * 4, chunk + i * 4 + 3)
+      w[i] = bor(lshift(b0, 24), lshift(b1, 16), lshift(b2, 8), b3)
+    end
+    for i = 16, 63 do
+      local x, y = w[i - 15], w[i - 2]
+      local s0 = bxor(ror(x, 7), ror(x, 18), rshift(x, 3))
+      local s1 = bxor(ror(y, 17), ror(y, 19), rshift(y, 10))
+      w[i] = tobit(w[i - 16] + s0 + w[i - 7] + s1)
+    end
+    local a, b, c, d, e, f, g, h = h0, h1, h2, h3, h4, h5, h6, h7
+    for i = 0, 63 do
+      local s1 = bxor(ror(e, 6), ror(e, 11), ror(e, 25))
+      local ch = bxor(band(e, f), band(bnot(e), g))
+      local t1 = h + s1 + ch + SHA256_K[i + 1] + w[i]
+      local s0 = bxor(ror(a, 2), ror(a, 13), ror(a, 22))
+      local maj = bxor(band(a, b), band(a, c), band(b, c))
+      h, g, f, e, d, c, b, a = g, f, e, tobit(d + t1), c, b, a, tobit(t1 + s0 + maj)
+    end
+    h0, h1, h2, h3 = tobit(h0 + a), tobit(h1 + b), tobit(h2 + c), tobit(h3 + d)
+    h4, h5, h6, h7 = tobit(h4 + e), tobit(h5 + f), tobit(h6 + g), tobit(h7 + h)
+  end
+  return u32_be(h0) .. u32_be(h1) .. u32_be(h2) .. u32_be(h3) .. u32_be(h4) .. u32_be(h5) .. u32_be(h6) .. u32_be(h7)
+end
+
+-- AES-256, encryption direction only: GCM never needs the inverse cipher.
+
+local SBOX, XTIME = {}, {}
+do
+  for i = 0, 255 do
+    XTIME[i] = band(bxor(lshift(i, 1), band(i, 0x80) ~= 0 and 0x1b or 0), 0xff)
+  end
+  local function rotl8(x, s)
+    return band(bor(lshift(x, s), rshift(x, 8 - s)), 0xff)
+  end
+  -- p walks the multiplicative group by 3 and q by its inverse, so q = p^-1.
+  local p, q = 1, 1
+  repeat
+    p = bxor(p, XTIME[p])
+    q = bxor(q, lshift(q, 1))
+    q = bxor(q, lshift(q, 2))
+    q = bxor(q, lshift(q, 4))
+    q = band(q, 0xff)
+    if band(q, 0x80) ~= 0 then
+      q = bxor(q, 0x09)
+    end
+    SBOX[p] = bxor(q, rotl8(q, 1), rotl8(q, 2), rotl8(q, 3), rotl8(q, 4), 0x63)
+  until p == 1
+  SBOX[0] = 0x63
+end
+
+---@param key string 32 bytes
+---@return integer[] 240 round-key bytes, 0-based
+local function aes_expand_key(key)
+  local w = {}
+  for i = 0, 31 do
+    w[i] = key:byte(i + 1)
+  end
+  local rcon = 1
+  for i = 8, 59 do
+    local t0, t1, t2, t3 = w[i * 4 - 4], w[i * 4 - 3], w[i * 4 - 2], w[i * 4 - 1]
+    if i % 8 == 0 then
+      t0, t1, t2, t3 = bxor(SBOX[t1], rcon), SBOX[t2], SBOX[t3], SBOX[t0]
+      rcon = XTIME[rcon]
+    elseif i % 8 == 4 then
+      t0, t1, t2, t3 = SBOX[t0], SBOX[t1], SBOX[t2], SBOX[t3]
+    end
+    w[i * 4] = bxor(w[i * 4 - 32], t0)
+    w[i * 4 + 1] = bxor(w[i * 4 - 31], t1)
+    w[i * 4 + 2] = bxor(w[i * 4 - 30], t2)
+    w[i * 4 + 3] = bxor(w[i * 4 - 29], t3)
+  end
+  return w
+end
+
+---@param rk integer[]
+---@param input integer[] 16 bytes, 0-based
+---@return integer[] 16 bytes, 0-based
+local function aes_encrypt_block(rk, input)
+  local s, t = {}, {}
+  for i = 0, 15 do
+    s[i] = bxor(input[i], rk[i])
+  end
+  for round = 1, 14 do
+    -- SubBytes and ShiftRows. The state is column-major; row r rotates left by r.
+    for c = 0, 3 do
+      for r = 0, 3 do
+        t[r + 4 * c] = SBOX[s[r + 4 * ((c + r) % 4)]]
+      end
+    end
+    if round < 14 then
+      for c = 0, 12, 4 do
+        local a0, a1, a2, a3 = t[c], t[c + 1], t[c + 2], t[c + 3]
+        local x0, x1, x2, x3 = XTIME[a0], XTIME[a1], XTIME[a2], XTIME[a3]
+        s[c] = bxor(x0, x1, a1, a2, a3)
+        s[c + 1] = bxor(a0, x1, x2, a2, a3)
+        s[c + 2] = bxor(a0, a1, x2, x3, a3)
+        s[c + 3] = bxor(x0, a0, a1, a2, x3)
+      end
+    else
+      for i = 0, 15 do
+        s[i] = t[i]
+      end
+    end
+    local base = round * 16
+    for i = 0, 15 do
+      s[i] = bxor(s[i], rk[base + i])
+    end
+  end
+  return s
+end
+
+-- AES-256-GCM (NIST SP 800-38D) with a 96-bit IV and no additional data.
+
+---@param b integer[] 16 bytes, 0-based; missing bytes are zero
+---@return integer, integer, integer, integer
+local function to_words(b)
+  local w = {}
+  for i = 0, 3 do
+    local j = i * 4
+    w[i + 1] = bor(lshift(b[j] or 0, 24), lshift(b[j + 1] or 0, 16), lshift(b[j + 2] or 0, 8), b[j + 3] or 0)
+  end
+  return w[1], w[2], w[3], w[4]
+end
+
+---Multiply in GF(2^128) with GCM's bit-reflected convention.
+local function gf_mul(x0, x1, x2, x3, y0, y1, y2, y3)
+  local z0, z1, z2, z3 = 0, 0, 0, 0
+  local x = { x0, x1, x2, x3 }
+  for i = 0, 127 do
+    if band(x[floor(i / 32) + 1], lshift(1, 31 - i % 32)) ~= 0 then
+      z0, z1, z2, z3 = bxor(z0, y0), bxor(z1, y1), bxor(z2, y2), bxor(z3, y3)
+    end
+    local lsb = band(y3, 1)
+    y3 = bor(rshift(y3, 1), lshift(band(y2, 1), 31))
+    y2 = bor(rshift(y2, 1), lshift(band(y1, 1), 31))
+    y1 = bor(rshift(y1, 1), lshift(band(y0, 1), 31))
+    y0 = rshift(y0, 1)
+    if lsb ~= 0 then
+      y0 = bxor(y0, 0xe1000000)
+    end
+  end
+  return z0, z1, z2, z3
+end
+
+---@param key string 32 bytes
+---@param iv string 12 bytes
+---@param input string
+---@param encrypting boolean
+---@return string output
+---@return string tag 16 bytes, computed over the ciphertext
+local function gcm(key, iv, input, encrypting)
+  if #key ~= 32 then
+    error('AES-256-GCM key must be 32 bytes')
+  end
+  if #iv ~= 12 then
+    error('AES-GCM IV must be 12 bytes')
+  end
+  local rk = aes_expand_key(key)
+  local zero = {}
+  for i = 0, 15 do
+    zero[i] = 0
+  end
+  local h0, h1, h2, h3 = to_words(aes_encrypt_block(rk, zero))
+
+  local counter = {}
+  for i = 0, 11 do
+    counter[i] = iv:byte(i + 1)
+  end
+  counter[12], counter[13], counter[14], counter[15] = 0, 0, 0, 1
+  local tag_mask = aes_encrypt_block(rk, counter)
+
+  local out = {}
+  local g0, g1, g2, g3 = 0, 0, 0, 0
+  local n = #input
+  for offset = 0, n - 1, 16 do
+    for i = 15, 12, -1 do
+      counter[i] = (counter[i] + 1) % 256
+      if counter[i] ~= 0 then
+        break
+      end
+    end
+    local stream = aes_encrypt_block(rk, counter)
+    local cipher_block, out_bytes = {}, {}
+    for i = 0, math.min(15, n - offset - 1) do
+      local byte = input:byte(offset + i + 1)
+      local mixed = bxor(byte, stream[i])
+      out_bytes[i + 1] = mixed
+      cipher_block[i] = encrypting and mixed or byte
+    end
+    out[#out + 1] = string.char(unpack(out_bytes))
+    local c0, c1, c2, c3 = to_words(cipher_block)
+    g0, g1, g2, g3 = gf_mul(bxor(g0, c0), bxor(g1, c1), bxor(g2, c2), bxor(g3, c3), h0, h1, h2, h3)
+  end
+
+  local bits = n * 8
+  g0, g1, g2, g3 =
+    gf_mul(g0, g1, bxor(g2, floor(bits / 4294967296)), bxor(g3, tobit(bits % 4294967296)), h0, h1, h2, h3)
+  local m0, m1, m2, m3 = to_words(tag_mask)
+  local tag = u32_be(bxor(g0, m0)) .. u32_be(bxor(g1, m1)) .. u32_be(bxor(g2, m2)) .. u32_be(bxor(g3, m3))
+  return table.concat(out), tag
+end
+
+---@param key string
 ---@param iv string
 ---@param plaintext string
 ---@return string ciphertext
 ---@return string tag
----@return string client_pubkey
-function M.encrypt_payload(peer_pubkey_raw, iv, plaintext)
-  local crypto = get_crypto()
-  local nid = get_nid_x25519(crypto)
-
-  local pctx = crypto.EVP_PKEY_CTX_new_id(nid, nil)
-  if pctx == nil then
-    error('failed to create OpenSSL keygen context')
-  end
-  if crypto.EVP_PKEY_keygen_init(pctx) ~= 1 then
-    crypto.EVP_PKEY_CTX_free(pctx)
-    error('failed to initialize keygen context')
-  end
-  local pkey = ffi.new('EVP_PKEY*[1]')
-  if crypto.EVP_PKEY_keygen(pctx, pkey) ~= 1 or pkey[0] == nil then
-    crypto.EVP_PKEY_CTX_free(pctx)
-    error('failed to generate X25519 key')
-  end
-  crypto.EVP_PKEY_CTX_free(pctx)
-
-  local ok, res_or_err = pcall(function()
-    local publen = ffi.new('size_t[1]', 32)
-    local pubbuf = ffi.new('unsigned char[32]')
-    if crypto.EVP_PKEY_get_raw_public_key(pkey[0], pubbuf, publen) ~= 1 then
-      error('failed to get raw public key')
-    end
-    local client_pubkey = ffi.string(pubbuf, publen[0])
-
-    local peer_key = crypto.EVP_PKEY_new_raw_public_key(nid, nil, peer_pubkey_raw, #peer_pubkey_raw)
-    if peer_key == nil then
-      error('failed to load peer public key')
-    end
-
-    local dctx = crypto.EVP_PKEY_CTX_new(pkey[0], nil)
-    if dctx == nil then
-      crypto.EVP_PKEY_free(peer_key)
-      error('failed to create derive context')
-    end
-
-    local sym_key = ffi.new('unsigned char[32]')
-    local derive_ok, derive_err = pcall(function()
-      if crypto.EVP_PKEY_derive_init(dctx) ~= 1 then
-        error('failed to initialize derive context')
-      end
-      if crypto.EVP_PKEY_derive_set_peer(dctx, peer_key) ~= 1 then
-        error('failed to set peer key')
-      end
-      local secret_len = ffi.new('size_t[1]', 0)
-      if crypto.EVP_PKEY_derive(dctx, nil, secret_len) ~= 1 then
-        error('failed to get shared secret length')
-      end
-      local secret = ffi.new('unsigned char[?]', secret_len[0])
-      if crypto.EVP_PKEY_derive(dctx, secret, secret_len) ~= 1 then
-        error('failed to derive shared secret')
-      end
-      crypto.SHA256(secret, secret_len[0], sym_key)
-    end)
-
-    crypto.EVP_PKEY_CTX_free(dctx)
-    crypto.EVP_PKEY_free(peer_key)
-    if not derive_ok then
-      error(derive_err)
-    end
-
-    local cctx = crypto.EVP_CIPHER_CTX_new()
-    if cctx == nil then
-      error('failed to create cipher context')
-    end
-
-    local enc_ok, enc_res = pcall(function()
-      if crypto.EVP_EncryptInit_ex(cctx, crypto.EVP_aes_256_gcm(), nil, nil, nil) ~= 1 then
-        error('failed to initialize AES-256-GCM cipher')
-      end
-      if crypto.EVP_CIPHER_CTX_ctrl(cctx, 0x9, #iv, nil) ~= 1 then
-        error('failed to set IV length')
-      end
-      if crypto.EVP_EncryptInit_ex(cctx, nil, nil, sym_key, iv) ~= 1 then
-        error('failed to set key and IV')
-      end
-
-      local out = ffi.new('unsigned char[?]', #plaintext + 16)
-      local outl = ffi.new('int[1]')
-      if crypto.EVP_EncryptUpdate(cctx, out, outl, plaintext, #plaintext) ~= 1 then
-        error('failed to encrypt plaintext')
-      end
-      local clen = outl[0]
-      local final_outl = ffi.new('int[1]')
-      if crypto.EVP_EncryptFinal_ex(cctx, out + clen, final_outl) ~= 1 then
-        error('failed to finalize encryption')
-      end
-      clen = clen + final_outl[0]
-      local ciphertext = ffi.string(out, clen)
-
-      local tag = ffi.new('unsigned char[16]')
-      if crypto.EVP_CIPHER_CTX_ctrl(cctx, 0x10, 16, tag) ~= 1 then
-        error('failed to get AEAD tag')
-      end
-      local tag_str = ffi.string(tag, 16)
-
-      return {
-        ciphertext = ciphertext,
-        tag = tag_str,
-        client_pubkey = client_pubkey,
-      }
-    end)
-
-    crypto.EVP_CIPHER_CTX_free(cctx)
-    if not enc_ok then
-      error(enc_res)
-    end
-    return enc_res
-  end)
-
-  crypto.EVP_PKEY_free(pkey[0])
-  if not ok then
-    error(res_or_err)
-  end
-  return res_or_err.ciphertext, res_or_err.tag, res_or_err.client_pubkey
+function M.aes_gcm_encrypt(key, iv, plaintext)
+  return gcm(key, iv, plaintext, true)
 end
 
----@param privkey_raw string
----@param client_pubkey_raw string
+---@param key string
 ---@param iv string
----@param tag string
 ---@param ciphertext string
+---@param tag string
 ---@return string plaintext
-function M.decrypt_payload(privkey_raw, client_pubkey_raw, iv, tag, ciphertext)
-  local crypto = get_crypto()
-  local nid = get_nid_x25519(crypto)
-
-  local peer_key = crypto.EVP_PKEY_new_raw_public_key(nid, nil, client_pubkey_raw, #client_pubkey_raw)
-  if peer_key == nil then
-    error('failed to load client public key')
+function M.aes_gcm_decrypt(key, iv, ciphertext, tag)
+  local plaintext, expected = gcm(key, iv, ciphertext, false)
+  local diff = #tag == 16 and 0 or 1
+  for i = 1, 16 do
+    diff = bor(diff, bxor(expected:byte(i), tag:byte(i) or 0))
   end
-
-  local priv_key = crypto.EVP_PKEY_new_raw_private_key(nid, nil, privkey_raw, #privkey_raw)
-  if priv_key == nil then
-    crypto.EVP_PKEY_free(peer_key)
-    error('failed to load private key')
+  if diff ~= 0 then
+    error('failed to authenticate AEAD tag')
   end
-
-  local ok, res_or_err = pcall(function()
-    local dctx = crypto.EVP_PKEY_CTX_new(priv_key, nil)
-    if dctx == nil then
-      error('failed to create derive context')
-    end
-
-    local sym_key = ffi.new('unsigned char[32]')
-    local derive_ok, derive_err = pcall(function()
-      if crypto.EVP_PKEY_derive_init(dctx) ~= 1 then
-        error('failed to initialize derive context')
-      end
-      if crypto.EVP_PKEY_derive_set_peer(dctx, peer_key) ~= 1 then
-        error('failed to set peer key')
-      end
-      local secret_len = ffi.new('size_t[1]', 0)
-      if crypto.EVP_PKEY_derive(dctx, nil, secret_len) ~= 1 then
-        error('failed to get shared secret length')
-      end
-      local secret = ffi.new('unsigned char[?]', secret_len[0])
-      if crypto.EVP_PKEY_derive(dctx, secret, secret_len) ~= 1 then
-        error('failed to derive shared secret')
-      end
-      crypto.SHA256(secret, secret_len[0], sym_key)
-    end)
-
-    crypto.EVP_PKEY_CTX_free(dctx)
-    if not derive_ok then
-      error(derive_err)
-    end
-
-    local cctx = crypto.EVP_CIPHER_CTX_new()
-    if cctx == nil then
-      error('failed to create cipher context')
-    end
-
-    local dec_ok, dec_res = pcall(function()
-      if crypto.EVP_DecryptInit_ex(cctx, crypto.EVP_aes_256_gcm(), nil, nil, nil) ~= 1 then
-        error('failed to initialize AES-256-GCM cipher')
-      end
-      if crypto.EVP_CIPHER_CTX_ctrl(cctx, 0x9, #iv, nil) ~= 1 then
-        error('failed to set IV length')
-      end
-      if crypto.EVP_DecryptInit_ex(cctx, nil, nil, sym_key, iv) ~= 1 then
-        error('failed to set key and IV')
-      end
-
-      local out = ffi.new('unsigned char[?]', #ciphertext + 16)
-      local outl = ffi.new('int[1]')
-      if crypto.EVP_DecryptUpdate(cctx, out, outl, ciphertext, #ciphertext) ~= 1 then
-        error('failed to decrypt ciphertext')
-      end
-      local clen = outl[0]
-      if crypto.EVP_CIPHER_CTX_ctrl(cctx, 0x11, #tag, ffi.cast('void*', tag)) ~= 1 then
-        error('failed to set AEAD tag')
-      end
-      local final_outl = ffi.new('int[1]')
-      if crypto.EVP_DecryptFinal_ex(cctx, out + clen, final_outl) ~= 1 then
-        error('failed to authenticate AEAD tag')
-      end
-      clen = clen + final_outl[0]
-      return ffi.string(out, clen)
-    end)
-
-    crypto.EVP_CIPHER_CTX_free(cctx)
-    if not dec_ok then
-      error(dec_res)
-    end
-    return dec_res
-  end)
-
-  crypto.EVP_PKEY_free(peer_key)
-  crypto.EVP_PKEY_free(priv_key)
-  if not ok then
-    error(res_or_err)
-  end
-  return res_or_err
+  return plaintext
 end
 
----Generate an ephemeral X25519 keypair for tests or simulation.
----@return { public: string, public_raw: string, private: string, private_b85: string }
-function M.generate_keypair()
-  local crypto = get_crypto()
-  local nid = get_nid_x25519(crypto)
+-- X25519 (RFC 7748). Field elements mod 2^255 - 19 are 16 limbs of 16 bits, ported from TweetNaCl.
+-- Lua numbers are doubles, exact up to 2^53, which covers every intermediate product sum here.
 
-  local pctx = crypto.EVP_PKEY_CTX_new_id(nid, nil)
-  if pctx == nil then
-    error('failed to create keygen context')
+local function fe(init)
+  local o = {}
+  for i = 0, 15 do
+    o[i] = init and init[i + 1] or 0
   end
-  if crypto.EVP_PKEY_keygen_init(pctx) ~= 1 then
-    crypto.EVP_PKEY_CTX_free(pctx)
-    error('failed to initialize keygen context')
-  end
-  local pkey = ffi.new('EVP_PKEY*[1]')
-  if crypto.EVP_PKEY_keygen(pctx, pkey) ~= 1 or pkey[0] == nil then
-    crypto.EVP_PKEY_CTX_free(pctx)
-    error('failed to generate key')
-  end
-  crypto.EVP_PKEY_CTX_free(pctx)
-
-  local publen = ffi.new('size_t[1]', 32)
-  local pubbuf = ffi.new('unsigned char[32]')
-  if crypto.EVP_PKEY_get_raw_public_key(pkey[0], pubbuf, publen) ~= 1 then
-    crypto.EVP_PKEY_free(pkey[0])
-    error('failed to get raw public key')
-  end
-  local pub_raw = ffi.string(pubbuf, publen[0])
-
-  local privlen = ffi.new('size_t[1]', 32)
-  local privbuf = ffi.new('unsigned char[32]')
-  if crypto.EVP_PKEY_get_raw_private_key(pkey[0], privbuf, privlen) ~= 1 then
-    crypto.EVP_PKEY_free(pkey[0])
-    error('failed to get raw private key')
-  end
-  local priv_raw = ffi.string(privbuf, privlen[0])
-  crypto.EVP_PKEY_free(pkey[0])
-
-  return {
-    public = M.b85encode(pub_raw),
-    public_raw = pub_raw,
-    private = priv_raw,
-    private_b85 = M.b85encode(priv_raw),
-  }
+  return o
 end
 
----Encrypt command if password is present, otherwise return command unchanged.
----@param command table
----@return table
-function M.encrypt(command)
-  if type(command.password) ~= 'string' or command.password == '' then
-    return command
-  end
+local FE_121665 = fe({ 0xDB41, 1 })
 
+local function car25519(o)
+  for i = 0, 15 do
+    o[i] = o[i] + 65536
+    local c = floor(o[i] / 65536)
+    if i < 15 then
+      o[i + 1] = o[i + 1] + c - 1
+    else
+      o[0] = o[0] + 38 * (c - 1)
+    end
+    o[i] = o[i] - c * 65536
+  end
+end
+
+local function sel25519(p, q, b)
+  if b ~= 0 then
+    for i = 0, 15 do
+      p[i], q[i] = q[i], p[i]
+    end
+  end
+end
+
+local function fe_add(o, a, b)
+  for i = 0, 15 do
+    o[i] = a[i] + b[i]
+  end
+end
+
+local function fe_sub(o, a, b)
+  for i = 0, 15 do
+    o[i] = a[i] - b[i]
+  end
+end
+
+local function fe_mul(o, a, b)
+  local t = {}
+  for i = 0, 30 do
+    t[i] = 0
+  end
+  for i = 0, 15 do
+    local ai = a[i]
+    for j = 0, 15 do
+      t[i + j] = t[i + j] + ai * b[j]
+    end
+  end
+  for i = 0, 14 do
+    t[i] = t[i] + 38 * t[i + 16]
+  end
+  for i = 0, 15 do
+    o[i] = t[i]
+  end
+  car25519(o)
+  car25519(o)
+end
+
+local function fe_inv(o, i)
+  local c = fe()
+  for a = 0, 15 do
+    c[a] = i[a]
+  end
+  for a = 253, 0, -1 do
+    fe_mul(c, c, c)
+    if a ~= 2 and a ~= 4 then
+      fe_mul(c, c, i)
+    end
+  end
+  for a = 0, 15 do
+    o[a] = c[a]
+  end
+end
+
+---@param n table field element
+---@return string 32 bytes, little-endian
+local function pack25519(n)
+  local t, m = fe(), fe()
+  for i = 0, 15 do
+    t[i] = n[i]
+  end
+  car25519(t)
+  car25519(t)
+  car25519(t)
+  for _ = 1, 2 do
+    m[0] = t[0] - 0xffed
+    for i = 1, 14 do
+      m[i] = t[i] - 0xffff - band(arshift(m[i - 1], 16), 1)
+      m[i - 1] = band(m[i - 1], 0xffff)
+    end
+    m[15] = t[15] - 0x7fff - band(arshift(m[14], 16), 1)
+    local b = band(arshift(m[15], 16), 1)
+    m[14] = band(m[14], 0xffff)
+    sel25519(t, m, 1 - b)
+  end
+  local out = {}
+  for i = 0, 15 do
+    out[2 * i + 1] = band(t[i], 0xff)
+    out[2 * i + 2] = band(rshift(t[i], 8), 0xff)
+  end
+  return string.char(unpack(out))
+end
+
+---@param s string 32 bytes, little-endian
+local function unpack25519(s)
+  local o = fe()
+  for i = 0, 15 do
+    o[i] = s:byte(2 * i + 1) + s:byte(2 * i + 2) * 256
+  end
+  o[15] = band(o[15], 0x7fff)
+  return o
+end
+
+---@param scalar string 32 bytes
+---@param point string 32 bytes, u-coordinate
+---@return string 32 bytes
+function M.x25519(scalar, point)
+  if #scalar ~= 32 or #point ~= 32 then
+    error('X25519 inputs must be 32 bytes')
+  end
+  local z = { scalar:byte(1, 32) }
+  z[32] = bor(band(z[32], 127), 64)
+  z[1] = band(z[1], 248)
+
+  local x = unpack25519(point)
+  local a, b, c, d, e, f = fe(), fe(), fe(), fe(), fe(), fe()
+  for i = 0, 15 do
+    b[i] = x[i]
+  end
+  a[0], d[0] = 1, 1
+
+  for i = 254, 0, -1 do
+    local r = band(rshift(z[floor(i / 8) + 1], i % 8), 1)
+    sel25519(a, b, r)
+    sel25519(c, d, r)
+    fe_add(e, a, c)
+    fe_sub(a, a, c)
+    fe_add(c, b, d)
+    fe_sub(b, b, d)
+    fe_mul(d, e, e)
+    fe_mul(f, a, a)
+    fe_mul(a, c, a)
+    fe_mul(c, b, e)
+    fe_add(e, a, c)
+    fe_sub(a, a, c)
+    fe_mul(b, a, a)
+    fe_sub(c, d, f)
+    fe_mul(a, c, FE_121665)
+    fe_add(a, a, d)
+    fe_mul(c, c, a)
+    fe_mul(a, d, f)
+    fe_mul(d, b, x)
+    fe_mul(b, e, e)
+    sel25519(a, b, r)
+    sel25519(c, d, r)
+  end
+  fe_inv(c, c)
+  fe_mul(a, a, c)
+  return pack25519(a)
+end
+
+local BASEPOINT = string.char(9) .. string.rep('\0', 31)
+
+---@param private? string 32 bytes; random when omitted
+---@return { private: string, public: string }
+function M.generate_keypair(private)
+  private = private or vim.uv.random(32)
+  if not private or #private ~= 32 then
+    error('failed to generate random bytes for X25519 key')
+  end
+  return { private = private, public = M.x25519(private, BASEPOINT) }
+end
+
+-- Kitty protocol
+
+---X25519 dominates the cost, so the client key and derived AES key live for the
+---session and are only recomputed when kitty's public key changes.
+---@type { peer: string, public: string, key: string }|nil
+local session = nil
+
+---@param peer_pubkey string 32 bytes
+---@return string aes_key
+---@return string client_pubkey
+local function session_key(peer_pubkey)
+  if not session or session.peer ~= peer_pubkey then
+    local pair = M.generate_keypair()
+    session = {
+      peer = peer_pubkey,
+      public = pair.public,
+      key = M.sha256(M.x25519(pair.private, peer_pubkey)),
+    }
+  end
+  return session.key, session.public
+end
+
+---@return string
+local function timestamp_ns()
+  local t = vim.uv.clock_gettime('realtime')
+  if not t then
+    error('failed to get system time')
+  end
+  return ('%d%09d'):format(t.sec, t.nsec)
+end
+
+---@return string
+local function peer_public_key()
   local raw_key = vim.env.KITTY_PUBLIC_KEY
   if type(raw_key) ~= 'string' or raw_key == '' then
     error('KITTY_PUBLIC_KEY is unset')
   end
-
   local proto, b85_key = raw_key:match('^(%d+):(.+)$')
   if not proto or not b85_key then
     error('invalid KITTY_PUBLIC_KEY: missing protocol or key data')
@@ -452,32 +565,37 @@ function M.encrypt(command)
   if proto ~= '1' then
     error('unsupported KITTY_PUBLIC_KEY protocol: ' .. proto)
   end
-
-  local peer_pubkey = M.b85decode(b85_key)
-  if #peer_pubkey ~= 32 then
+  local key = M.b85decode(b85_key)
+  if #key ~= 32 then
     error('invalid KITTY_PUBLIC_KEY: decoded key length is not 32 bytes')
   end
+  return key
+end
 
-  local to_encrypt = vim.deepcopy(command)
-  if not to_encrypt.timestamp then
-    local t = vim.uv.clock_gettime('realtime')
-    if not t then
-      error('failed to get system time')
-    end
-    to_encrypt.timestamp = t.sec * 1000000000 + t.nsec
+---Encrypt a command if it carries a password, otherwise return it unchanged.
+---@param command table
+---@return table
+function M.encrypt(command)
+  if type(command.password) ~= 'string' or command.password == '' then
+    return command
   end
+  local key, client_pubkey = session_key(peer_public_key())
 
-  local iv = to_encrypt._iv or vim.uv.random(12)
-  to_encrypt._iv = nil
+  local inner = vim.deepcopy(command)
+  local iv = inner._iv or vim.uv.random(12)
+  inner._iv = nil
   if not iv then
     error('failed to generate random bytes for IV')
   end
+  -- Kitty drops a command whose timestamp is not a JSON integer, and nanoseconds exceed what a
+  -- Lua number encodes exactly, so the digits are spliced in after encoding.
+  local placeholder = '__smart_splits_timestamp__'
+  inner.timestamp = placeholder
+  local plaintext = vim.json.encode(inner):gsub('"' .. placeholder .. '"', timestamp_ns(), 1)
 
-  local plaintext = vim.json.encode(to_encrypt)
-  local ciphertext, tag, client_pubkey = M.encrypt_payload(peer_pubkey, iv, plaintext)
-
+  local ciphertext, tag = M.aes_gcm_encrypt(key, iv, plaintext)
   return {
-    version = command.version or { 0, 45, 0 },
+    version = command.version,
     iv = M.b85encode(iv),
     tag = M.b85encode(tag),
     pubkey = M.b85encode(client_pubkey),
@@ -485,20 +603,16 @@ function M.encrypt(command)
   }
 end
 
----Decrypt an encrypted envelope table using a raw 32-byte private key.
+---Decrypt an envelope the way kitty does. Tests use it to stand in for kitty.
 ---@param envelope table
----@param privkey string
----@return table
-function M.decrypt(envelope, privkey)
+---@param private string kitty's raw 32-byte private key
+---@return string plaintext JSON
+function M.decrypt(envelope, private)
   if type(envelope) ~= 'table' or not envelope.encrypted then
     error('invalid encrypted envelope')
   end
-  local client_pubkey = M.b85decode(envelope.pubkey)
-  local iv = M.b85decode(envelope.iv)
-  local tag = M.b85decode(envelope.tag)
-  local ciphertext = M.b85decode(envelope.encrypted)
-  local plaintext = M.decrypt_payload(privkey, client_pubkey, iv, tag, ciphertext)
-  return vim.json.decode(plaintext, { luanil = { object = true, array = true } })
+  local key = M.sha256(M.x25519(private, M.b85decode(envelope.pubkey)))
+  return M.aes_gcm_decrypt(key, M.b85decode(envelope.iv), M.b85decode(envelope.encrypted), M.b85decode(envelope.tag))
 end
 
 return M
