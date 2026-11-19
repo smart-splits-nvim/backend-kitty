@@ -135,7 +135,7 @@ describe('socket protocol', function()
 
     before_each(function()
       server_key = crypto.generate_keypair()
-      vim.env.KITTY_PUBLIC_KEY = '1:' .. server_key.public
+      vim.env.KITTY_PUBLIC_KEY = '1:' .. crypto.b85encode(server_key.public)
     end)
 
     after_each(function()
@@ -166,7 +166,7 @@ describe('socket protocol', function()
     end)
 
     it('rejects unsupported protocol version', function()
-      vim.env.KITTY_PUBLIC_KEY = '2:' .. server_key.public
+      vim.env.KITTY_PUBLIC_KEY = '2:' .. crypto.b85encode(server_key.public)
       assert.has_error(function()
         socket.encode({ cmd = 'ls', password = 'secret' })
       end, 'unsupported KITTY_PUBLIC_KEY protocol: 2')
@@ -198,17 +198,18 @@ describe('socket protocol', function()
       assert.is_not_nil(outer.pubkey)
       assert.is_not_nil(outer.encrypted)
 
-      local decrypted = crypto.decrypt(outer, server_key.private)
+      local plaintext = crypto.decrypt(outer, server_key.private)
+      local decrypted = vim.json.decode(plaintext)
       assert.are.equal(original_cmd.cmd, decrypted.cmd)
       assert.are.equal(original_cmd.password, decrypted.password)
       assert.are.equal(original_cmd.payload.increment, decrypted.payload.increment)
-      assert.is_number(decrypted.timestamp)
 
-      -- Check timestamp freshness (within 5 seconds)
+      -- kitty ignores a command whose timestamp is not a JSON integer
+      local digits = plaintext:match('"timestamp":(%d+)[,}]')
+      assert.is_not_nil(digits)
       local t = vim.uv.clock_gettime('realtime')
-      local now_ns = t.sec * 1000000000 + t.nsec
-      local diff = math.abs(now_ns - decrypted.timestamp)
-      assert.is_true(diff < 5 * 1000000000)
+      local diff = math.abs(t.sec - tonumber(digits:sub(1, -10)))
+      assert.is_true(diff < 5)
     end)
 
     it('fails decryption when ciphertext or tag is tampered with', function()
@@ -222,6 +223,53 @@ describe('socket protocol', function()
       assert.has_error(function()
         crypto.decrypt(outer, server_key.private)
       end)
+    end)
+  end)
+
+  describe('primitives', function()
+    local function unhex(h)
+      return (h:gsub('..', function(x)
+        return string.char(tonumber(x, 16))
+      end))
+    end
+
+    it('computes SHA-256', function()
+      assert.are.equal(unhex('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'), crypto.sha256('abc'))
+      assert.are.equal(
+        unhex('248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1'),
+        crypto.sha256('abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq')
+      )
+    end)
+
+    it('computes X25519 (RFC 7748)', function()
+      assert.are.equal(
+        unhex('c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552'),
+        crypto.x25519(
+          unhex('a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4'),
+          unhex('e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c')
+        )
+      )
+      local alice = crypto.generate_keypair(unhex('77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a'))
+      assert.are.equal(unhex('8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a'), alice.public)
+    end)
+
+    it('computes AES-256-GCM (GCM spec test case 15)', function()
+      local key = unhex('feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308')
+      local iv = unhex('cafebabefacedbaddecaf888')
+      local plaintext = unhex(
+        'd9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72'
+          .. '1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b391aafd255'
+      )
+      local ciphertext, tag = crypto.aes_gcm_encrypt(key, iv, plaintext)
+      assert.are.equal(
+        unhex(
+          '522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa'
+            .. '8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662898015ad'
+        ),
+        ciphertext
+      )
+      assert.are.equal(unhex('b094dac5d93471bdec1a502270e3cc6c'), tag)
+      assert.are.equal(plaintext, crypto.aes_gcm_decrypt(key, iv, ciphertext, tag))
     end)
   end)
 end)
