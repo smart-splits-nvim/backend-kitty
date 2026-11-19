@@ -6,7 +6,7 @@ local bit = require('bit')
 local band, bor, bxor, bnot = bit.band, bit.bor, bit.bxor, bit.bnot
 local lshift, rshift, arshift, ror, tobit = bit.lshift, bit.rshift, bit.arshift, bit.ror, bit.tobit
 local floor = math.floor
-local unpack = unpack or table.unpack
+local unpack = unpack
 
 local M = {}
 
