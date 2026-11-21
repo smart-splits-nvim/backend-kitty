@@ -3,6 +3,7 @@ local M = {}
 ---@class SmartSplits.Kitty.Config
 ---@field enable boolean
 ---@field password string|nil remote control password; falls back to `vim.g.smart_splits_kitty_password`
+---@field provide_password_via_stdin boolean use the Kitty CLI with the password on stdin
 ---@field split SmartSplits.Kitty.Config.Split
 ---@field zoom SmartSplits.Kitty.Config.Zoom
 
@@ -18,6 +19,7 @@ local M = {}
 ---@class SmartSplits.Kitty.PartialConfig
 ---@field enable? boolean
 ---@field password? string|nil
+---@field provide_password_via_stdin? boolean
 ---@field split? SmartSplits.Kitty.PartialConfig.Split
 ---@field zoom? SmartSplits.Kitty.PartialConfig.Zoom
 
@@ -34,6 +36,7 @@ local M = {}
 M.defaults = {
   enable = true,
   password = nil,
+  provide_password_via_stdin = false,
   split = {
     left = true,
     right = true,
